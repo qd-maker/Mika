@@ -16,13 +16,19 @@ internal object StopRules {
         else -> stop?.let(::guard)
     }
 
-    /** 步数用完后的最后一轮调了工具(只给了 end_not_done):放弃按它结束,否则算步数用完。 */
-    fun afterFinalTurn(outcome: Outcome?, maxSteps: Int): TaskState = when (outcome) {
+    /** 步数用完(或在检查点停下)后的最后一轮调了工具(只给了 end_not_done):放弃按它结束,否则按 [otherwise]。 */
+    fun afterFinalTurn(outcome: Outcome?, otherwise: TaskState.Failed): TaskState = when (outcome) {
         is Outcome.Failure -> TaskState.Failed(outcome.message, FailKind.GaveUp)
-        else -> stepLimit(maxSteps)
+        else -> otherwise
     }
 
     fun stepLimit(maxSteps: Int) = TaskState.Failed("已达到 $maxSteps 步上限,任务没有完成。", FailKind.StepLimit)
+
+    /** 步数检查点上停下:用户选了停下([answered]),或没等到回答(无人值守、超时)。 */
+    fun checkpoint(steps: Int, answered: Boolean) = TaskState.Failed(
+        if (answered) "做了 $steps 步还没完成,按你的选择停下了。" else "做了 $steps 步还没完成,没等到你的回答,先停下了。",
+        FailKind.StepLimit,
+    )
 
     /** 提醒过一次,模型仍然回了空话(或又被输出上限截断)。 */
     fun noAnswer() = TaskState.Failed("模型停止了操作,没有给出回答。", FailKind.Model)

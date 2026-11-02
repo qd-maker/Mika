@@ -77,6 +77,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.time.ZoneId
+import java.util.UUID
 import com.wangzan101.mika.core.userscreen.UserScreenSource
 import com.wangzan101.mika.core.general.HISTORY_READ
 import com.wangzan101.mika.core.general.VIEW_USER_SCREEN
@@ -155,9 +156,12 @@ class AgentLoop(
     /** 同一网站、App 里连着做对外动作(发送、提交)时两次之间的间隔;默认不等。 */
     private val outwardPacing: OutwardPacing = OutwardPacing.Off,
     private val trace: RunTrace? = null,
+    /** 不限步数时每做满这么多步先问用户要不要继续(见 [TurnPolicy.checkpoint]);null 不问。给了步数上限时不用。 */
+    private val stepCheckpoint: Int? = null,
 ) {
     init {
         require(maxSteps > 0) { "maxSteps must be positive" }
+        require(stepCheckpoint == null || stepCheckpoint > 0) { "stepCheckpoint must be positive" }
         // 只有开着回放才在写操作前取目标元素与锚点
         tools.captureTargets = flags.replay
     }
@@ -450,6 +454,13 @@ class AgentLoop(
         for (step in 1..maxSteps) {
             appendSteers(history, inbox)
             if (maxSteps != Int.MAX_VALUE) TurnPolicy.beforeStep(TurnSnapshot(step, maxSteps))?.let { history += ctx.notice(it.source, it.text) }
+            else TurnPolicy.checkpoint(step, stepCheckpoint)?.let { done ->
+                askToContinue(done, history)?.let { stop ->
+                    appendSteers(history, inbox)
+                    refreshOffer()
+                    return finalTurn(task, history, specs, step, labels, place, recorder, facts(), inbox, stop)
+                }
+            }
             appendRuntimeState(history, place, labels, step)
             _state.value = TaskState.Running(step, note)
             refreshOffer()
@@ -706,6 +717,20 @@ class AgentLoop(
         return finalTurn(task, history, specs, maxSteps + 1, labels, place, recorder, facts(), inbox)
     }
 
+    /**
+     * 步数检查点:做了 [done] 步还没完成,停下来问用户要不要继续。继续返回 null;用户打了别的话,当作插话记进历史接着做。
+     * 选了停下,或没等到回答(无人值守、超时),返回结局,由最后一轮交代做到了哪里。
+     */
+    private suspend fun askToContinue(done: Int, history: MutableList<Message>): TaskState.Failed? {
+        val answer = user.awaitAnswer(TurnPolicy.checkpointPrompt(done), TurnPolicy.CHECKPOINT_OPTIONS)
+        return when (answer?.trim()) {
+            null -> StopRules.checkpoint(done, answered = false)
+            TurnPolicy.CHECKPOINT_STOP -> StopRules.checkpoint(done, answered = true)
+            TurnPolicy.CHECKPOINT_CONTINUE -> null
+            else -> { appendSteers(history, listOf(RunInbox.UserSteer(UUID.randomUUID().toString(), answer))); null }
+        }
+    }
+
     /** 运行记录里按结果另记的事:报告的障碍(供评测按 barrier 类归因;参数不对被拒的不算)、看过的个人技能、存下的记忆。 */
     private fun noteResultEvents(verb: Verb?, content: JsonObject) {
         if (verb == Verb.HandleObstacle && content["ok"] == JsonPrimitive(true)) {
@@ -936,7 +961,7 @@ class AgentLoop(
      */
     private suspend fun finalTurn(
         task: String, history: MutableList<Message>, specs: List<ToolSpec>, step: Int, labels: Map<String, String>, place: Place?, recorder: ActionRecorder,
-        facts: ReviewFacts, inbox: RunInbox?,
+        facts: ReviewFacts, inbox: RunInbox?, ended: TaskState.Failed = StopRules.stepLimit(maxSteps),
     ): TaskState {
         TurnPolicy.finalTurn().let { history += ctx.notice(it.source, it.text) }
         repeat(3) { attempt ->
@@ -949,7 +974,7 @@ class AgentLoop(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                return StopRules.stepLimit(maxSteps)
+                return ended
             }
             val text = reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text }.trim()
             history += Message(Role.Assistant, reply.parts, Author.Mika)
@@ -966,16 +991,16 @@ class AgentLoop(
             // 收尾模型也可能正在生成时收到插话。最多重答两次，其余交给下一任务。
             if (attempt < 2 && keepFinished(history, inbox)) return@repeat
             if (call == null) {
-                if (calls.isNotEmpty() || text.isEmpty() || reply.stopReason == StopReason.MaxTokens) return StopRules.stepLimit(maxSteps)
+                if (calls.isNotEmpty() || text.isEmpty() || reply.stopReason == StopReason.MaxTokens) return ended
                 return conclude(task, text, step, facts, history = null)!!
             }
             val started = now()
             // 只剩放弃,不改变手机
             val exec = tools.executeRead(call)
             recorder.result(step, call.name, tools.verb(call.name), exec.content, exec.record, null, null, now() - started, "model", call.id)
-            return StopRules.afterFinalTurn(exec.outcome, maxSteps)
+            return StopRules.afterFinalTurn(exec.outcome, ended)
         }
-        return StopRules.stepLimit(maxSteps)
+        return ended
     }
 
     companion object {
@@ -983,6 +1008,8 @@ class AgentLoop(
         const val DEFAULT_MAX_STEPS = 60
         /** 正常任务没有固定步数截止；显式步数预算只用于评测和指定上限的子任务。 */
         const val UNLIMITED_STEPS = Int.MAX_VALUE
+        /** 不限步数的任务默认每 50 步问一次要不要继续。 */
+        const val DEFAULT_STEP_CHECKPOINT = 50
         /** 核查期间界面上这一步的说明。 */
         const val VERIFYING_NOTE = "正在核实结果"
         val APPROVED_STEP_FIRST: String get() = Feedback["approved_step_first"]

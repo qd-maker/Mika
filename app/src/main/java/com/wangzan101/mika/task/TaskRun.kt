@@ -791,6 +791,8 @@ class TaskRun(
                     )
                 },
                 maxSteps = env.evalHooks.maxSteps ?: runSpec.stepBudget ?: AgentLoop.UNLIMITED_STEPS,
+                // 不限步数时每 50 步问一次要不要继续;设了步数上限(设置或评测)时这条不生效
+                stepCheckpoint = AgentLoop.DEFAULT_STEP_CHECKPOINT,
                 reviewFinalAnswer = false,
                 inputTimeoutMs = TaskService.INPUT_TIMEOUT_MS,
                 // 询问 / 自主:询问时只有花钱的一步先问(有确认关卡和 request_confirmation);自主时连付款也不问。

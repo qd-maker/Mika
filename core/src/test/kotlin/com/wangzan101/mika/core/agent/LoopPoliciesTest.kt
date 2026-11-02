@@ -36,6 +36,14 @@ class LoopPoliciesTest {
         assertTrue((1..9).all { TurnPolicy.beforeStep(TurnSnapshot(it, 9)) == null })
     }
 
+    @Test fun checkpointEveryNStepsBeforeTheNextOne() {
+        // 第 4 步开始前已做了 3 步
+        assertEquals(listOf(3, 6), (1..8).mapNotNull { TurnPolicy.checkpoint(it, 3) })
+        assertTrue((1..8).all { TurnPolicy.checkpoint(it, null) == null })
+        assertEquals(FailKind.StepLimit, StopRules.checkpoint(3, answered = true).kind)
+        assertTrue("3" in StopRules.checkpoint(3, answered = false).reason)
+    }
+
     @Test fun emptyReplyIsNudgedOnceThenStops() {
         assertEquals(Feedback["empty_reply"], TurnPolicy.afterEmpty(already = false, truncated = false)!!.text)
         assertEquals(Feedback["truncated_reply"], TurnPolicy.afterEmpty(already = false, truncated = true)!!.text)
@@ -73,7 +81,7 @@ class LoopPoliciesTest {
     }
 
     @Test fun finalTurnWithoutCallIsStepLimit() {
-        assertEquals(StopRules.stepLimit(3), StopRules.afterFinalTurn(null, 3))
+        assertEquals(StopRules.stepLimit(3), StopRules.afterFinalTurn(null, StopRules.stepLimit(3)))
         assertEquals(FailKind.StepLimit, StopRules.stepLimit(3).kind)
     }
 

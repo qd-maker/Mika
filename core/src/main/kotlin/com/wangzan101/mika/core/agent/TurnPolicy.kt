@@ -63,6 +63,23 @@ internal object TurnPolicy {
     /** 用户同意了、或回答了([what]),之后却什么也没做就要交回答:提醒一次照做,或说清为什么不做。 */
     fun followUp(what: String): Notice = Notice(Feedback["followup_source"], Feedback.format("followup_nudge", "what" to what))
 
+    /** 步数检查点上给用户的两个选项。 */
+    const val CHECKPOINT_CONTINUE = "继续"
+    const val CHECKPOINT_STOP = "停下"
+    val CHECKPOINT_OPTIONS = listOf(CHECKPOINT_CONTINUE, CHECKPOINT_STOP)
+
+    /**
+     * 步数检查点:不限步数的任务每做满 [every] 步,这一步开始前先问用户要不要继续,免得一个做不完的任务把额度耗光。
+     * 返回已做的步数;没到检查点或没开([every] 为 null)为 null。
+     */
+    fun checkpoint(step: Int, every: Int?): Int? {
+        if (every == null) return null
+        val done = step - 1
+        return done.takeIf { it > 0 && it % every == 0 }
+    }
+
+    fun checkpointPrompt(done: Int) = "已经做了 $done 步,任务还没完成。要继续吗?"
+
     /** 步数用完后最后一轮之前的提醒。 */
     fun finalTurn(): Notice = Notice(Feedback["final_source"], Feedback["final_turn"])
 
