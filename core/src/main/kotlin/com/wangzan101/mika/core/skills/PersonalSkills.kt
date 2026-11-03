@@ -19,17 +19,22 @@ data class PersonalSkill(
     val outcomes: List<String>,
     /** 更新草稿起草时读到的原文指纹；收下前必须重新读原文核对。 */
     val baseHash: String? = null,
-    /** 从哪儿来的:[SOURCE_USER] 是用户在任务里要求写下的(`skill_save`);为 null 是从办成的任务里沉淀的。 */
+    /**
+     * 从哪儿来的:[SOURCE_USER] 是用户在任务里要求写下的(`skill_save`);[SOURCE_IMPORTED] 是从别人分享的 SKILL.md 导入的
+     * (见 [SkillImport]);为 null 是从办成的任务里沉淀的。
+     */
     val source: String? = null,
 ) {
     val createdByUser: Boolean get() = source == SOURCE_USER
+    val imported: Boolean get() = source == SOURCE_IMPORTED
 
     /** 停用后恢复时回到哪一档:还没办成过的(沉淀的、用户要求写下的)回到试用,办成过的回到正式。 */
     fun restoredStatus(): SkillStatus =
-        if ((learnedFrom != null || createdByUser) && SkillResult.verified.name !in outcomes) SkillStatus.trial else SkillStatus.active
+        if ((learnedFrom != null || createdByUser || imported) && SkillResult.verified.name !in outcomes) SkillStatus.trial else SkillStatus.active
 
     companion object {
         const val SOURCE_USER = "user"
+        const val SOURCE_IMPORTED = "imported"
     }
 }
 

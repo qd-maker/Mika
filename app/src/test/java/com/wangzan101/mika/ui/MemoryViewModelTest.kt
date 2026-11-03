@@ -132,8 +132,9 @@ class MemoryViewModelTest {
     private fun skillMd(name: String, body: String) = "---\nname: $name\ndisplay: 发微信\ndescription: 给联系人发微信\n---\n$body"
     private fun fullMd(name: String, steps: String) = skillMd(name, "## 入口\n打开微信\n## 步骤\n$steps\n## 容易出错的地方\n同名群\n## 怎样算办成(核实证据)\n消息出现\n## 什么时候停下交给用户\n要登录时")
 
-    private fun TestScope.skillsVm(skills: com.wangzan101.mika.task.MapSkills): MemoryViewModel =
-        MemoryViewModel(store, MemorySettings(File(tmp.newFolder(), "s.json")), skills, backgroundScope).also { it.select(Segment.Skills); runCurrent() }
+    private fun TestScope.skillsVm(skills: com.wangzan101.mika.task.MapSkills, builtin: Set<String> = emptySet()): MemoryViewModel =
+        MemoryViewModel(store, MemorySettings(File(tmp.newFolder(), "s.json")), skills, backgroundScope, builtinSkillNames = builtin)
+            .also { it.select(Segment.Skills); runCurrent() }
 
     @Test fun approveWithEdit() = runTest {
         val skills = com.wangzan101.mika.task.MapSkills()
@@ -181,5 +182,46 @@ class MemoryViewModelTest {
         assertTrue(vm.ui.value.skills.installed.single().suspended)
         vm.deleteSkill("wechat-msg"); runCurrent()
         assertTrue(vm.ui.value.skills.installed.isEmpty())
+    }
+
+    // ---- 导入别人分享的技能(#165) ----
+
+    @Test fun importedSkillWaitsInPendingThenTrial() = runTest {
+        val skills = com.wangzan101.mika.task.MapSkills()
+        val vm = skillsVm(skills)
+        assertEquals(null, vm.importSkill(fullMd("wechat-msg", "1. 用 `phone_tap` 点搜索框"))); runCurrent()
+        assertEquals(Segment.Pending, vm.ui.value.segment)
+        assertEquals("已导入，到「待确认」里看看再收下。", vm.ui.value.message)
+        val draft = vm.ui.value.skills.drafts.single()
+        assertTrue(draft.imported)
+        assertTrue(skills.get("wechat-msg") == null)
+        vm.approveSkill(draft.id); runCurrent()
+        val got = skills.get("wechat-msg")!!
+        assertTrue(got.imported)
+        assertTrue(vm.ui.value.skills.installed.single().imported)
+    }
+
+    @Test fun importRefusesBadOrClashingSkills() = runTest {
+        val vm = skillsVm(com.wangzan101.mika.task.MapSkills(), builtin = setOf("wechat-msg"))
+        assertEquals("和内置技能重名了，改个名字再试。", vm.importSkill(fullMd("wechat-msg", "1. 点搜索框")))
+        assertTrue(vm.importSkill(skillMd("other", "## 步骤\n1. 点搜索框"))!!.contains("五个小节"))
+        // 原因由导入框自己显示,页面上不另弹提示
+        assertEquals(null, vm.ui.value.message)
+        assertTrue(vm.ui.value.skills.drafts.isEmpty())
+    }
+
+    @Test fun importedDraftIsCheckedEvenWhenNotEdited() = runTest {
+        val skills = com.wangzan101.mika.task.MapSkills()
+        val imported = com.wangzan101.mika.core.skills.PersonalSkill("wechat-msg", fullMd("wechat-msg", "用 `open_chat` 打开"),
+            com.wangzan101.mika.core.skills.SkillStatus.pending, null, null, 0, emptyList(), source = com.wangzan101.mika.core.skills.PersonalSkill.SOURCE_IMPORTED)
+        skills.putPending("d1", imported)
+        skills.putPending("d2", imported.copy(name = "learned", markdown = fullMd("learned", "用 `open_chat` 打开"), learnedFrom = "r1", source = null))
+        val vm = skillsVm(skills)
+        vm.approveSkill("d1"); runCurrent()
+        assertEquals("里面提到了 Mika 没有的工具", vm.ui.value.message)
+        assertTrue(skills.get("wechat-msg") == null)
+        // 自学的草稿起草时已经按那次运行的工具查过,没改过就照旧收下
+        vm.approveSkill("d2"); runCurrent()
+        assertTrue(skills.get("learned") != null)
     }
 }
