@@ -78,6 +78,8 @@
     <string name="skills_archived">Archived</string>
     <string name="skills_archive">Archive</string>
     <string name="skills_changed_lines">Changed lines:</string>
+    <string name="skills_get">Get skills</string>
+    <string name="skills_share">Share skill</string>
     <string name="skills_import">Import a skill</string>
     <string name="skills_import_sub">Paste a skill someone shared with you</string>
     <string name="skills_import_hint">It goes to “To review” first and isn’t used until you read it and accept it.</string>

@@ -78,6 +78,8 @@
     <string name="skills_archived">Diarsipkan</string>
     <string name="skills_archive">Arsipkan</string>
     <string name="skills_changed_lines">Baris yang berubah:</string>
+    <string name="skills_get">Dapatkan keterampilan</string>
+    <string name="skills_share">Bagikan keterampilan</string>
     <string name="skills_import">Impor keterampilan</string>
     <string name="skills_import_sub">Tempel keterampilan yang dibagikan orang lain</string>
     <string name="skills_import_hint">Masuk ke “Perlu ditinjau” dulu dan baru dipakai setelah kamu baca dan terima.</string>

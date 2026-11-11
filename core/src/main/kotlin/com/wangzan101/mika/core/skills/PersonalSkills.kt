@@ -71,24 +71,34 @@ interface PersonalSkills {
         /** 把头部的 `name:` 行改成 [name](收下更新草稿、改过全文时,头部名字要和存放的名字一致);没有头部原样返回。 */
         fun withName(markdown: String, name: String): String = withField(markdown, "name", name)
 
-        /** 头部的 [key] 行换成 [value](没有就加上);没有头部的原样返回。 */
+        /** 头部的 [key] 行换成 [value](没有就加上);重复字段只留一个,没有头部的原样返回。 */
         fun withField(markdown: String, key: String, value: String): String {
             val lines = markdown.replace("\r\n", "\n").split("\n").toMutableList()
             if (lines.firstOrNull()?.trimEnd() != "---") return markdown
             val end = (1 until lines.size).firstOrNull { lines[it].trimEnd() == "---" } ?: return markdown
-            val i = (1 until end).firstOrNull { lines[it].startsWith("$key:") }
-            if (i != null) lines[i] = "$key: $value" else lines.add(end, "$key: $value")
+            val matches = (1 until end).filter { isField(lines[it], key) }
+            if (matches.isEmpty()) lines.add(end, "$key: $value") else {
+                lines[matches.first()] = "$key: $value"
+                matches.drop(1).asReversed().forEach(lines::removeAt)
+            }
             return lines.joinToString("\n")
         }
 
-        /** 去掉头部的 [key] 行;没有头部或没有这一行的原样返回。 */
+        /** 去掉头部的全部 [key] 行;没有头部或没有这一行的原样返回。 */
         fun withoutField(markdown: String, key: String): String {
             val lines = markdown.replace("\r\n", "\n").split("\n").toMutableList()
             if (lines.firstOrNull()?.trimEnd() != "---") return markdown
             val end = (1 until lines.size).firstOrNull { lines[it].trimEnd() == "---" } ?: return markdown
-            val i = (1 until end).firstOrNull { lines[it].startsWith("$key:") } ?: return markdown
-            lines.removeAt(i)
+            val matches = (1 until end).filter { isField(lines[it], key) }
+            if (matches.isEmpty()) return markdown
+            matches.asReversed().forEach(lines::removeAt)
             return lines.joinToString("\n")
+        }
+
+        /** 和 FrontMatter 一样接受键名两边的空白。 */
+        private fun isField(line: String, key: String): Boolean {
+            val colon = line.indexOf(':')
+            return colon > 0 && line.substring(0, colon).trim() == key
         }
     }
 }

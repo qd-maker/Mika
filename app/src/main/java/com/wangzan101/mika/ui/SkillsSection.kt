@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import com.wangzan101.mika.ui.components.MikaDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.wangzan101.mika.core.knowledge.AppKnowledgeStage
+import com.wangzan101.mika.core.knowledge.FrontMatter
 import com.wangzan101.mika.core.skills.SkillImport
 import com.wangzan101.mika.ui.components.ActionSheet
 import com.wangzan101.mika.ui.components.ButtonKind
@@ -35,6 +36,7 @@ import com.wangzan101.mika.ui.components.ListRow
 import com.wangzan101.mika.ui.components.MikaButton
 import com.wangzan101.mika.ui.components.MikaSwitch
 import com.wangzan101.mika.ui.components.RowActions
+import com.wangzan101.mika.ui.components.RowChevron
 import com.wangzan101.mika.ui.components.SheetAction
 import com.wangzan101.mika.ui.theme.MikaTheme
 import com.wangzan101.mika.ui.theme.MikaType
@@ -94,7 +96,12 @@ internal fun SkillsSection(vm: MemoryViewModel, ui: SkillsUi, pending: Boolean) 
                     SkillBody(s, expanded = viewing == s.id)
                 }
             }
-            ListRow(null, stringResource(R.string.skills_import), stringResource(R.string.skills_import_sub), onClick = { importing = true })
+        }
+        GroupLabel(stringResource(R.string.skills_get))
+        GroupCard {
+            ListRow(null, stringResource(R.string.skills_import), stringResource(R.string.skills_import_sub), first = true, onClick = { importing = true }) {
+                RowChevron()
+            }
         }
         val inUse = ui.appKnowledge.filter { it.stage != AppKnowledgeStage.Draft }
         if (inUse.isNotEmpty()) {
@@ -110,7 +117,7 @@ internal fun SkillsSection(vm: MemoryViewModel, ui: SkillsUi, pending: Boolean) 
             s.display,
             listOfNotNull(
                 SheetAction(if (viewing == s.id) stringResource(R.string.skills_hide_full) else stringResource(R.string.skills_view_full)) { toggle(s.id) },
-                SheetAction(stringResource(R.string.share)) {
+                SheetAction(stringResource(R.string.skills_share)) {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(Intent.EXTRA_SUBJECT, s.display).putExtra(Intent.EXTRA_TEXT, SkillImport.shareable(s.markdown))
                     context.startActivity(Intent.createChooser(send, null))
@@ -125,7 +132,7 @@ internal fun SkillsSection(vm: MemoryViewModel, ui: SkillsUi, pending: Boolean) 
     if (importing) {
         var text by remember { mutableStateOf("") }
         var problem by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
+        MikaDialog(
             onDismissRequest = { importing = false },
             title = { Text(stringResource(R.string.skills_import)) },
             text = {
@@ -148,7 +155,7 @@ internal fun SkillsSection(vm: MemoryViewModel, ui: SkillsUi, pending: Boolean) 
 
     editing?.let { d ->
         var text by remember(d.id) { mutableStateOf(d.markdown) }
-        AlertDialog(
+        MikaDialog(
             onDismissRequest = { editing = null },
             title = { Text(stringResource(R.string.skills_edit_title)) },
             text = { KeyboardDismissArea { OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().heightIn(min = 240.dp).keepsKeyboard().testTag("skill-markdown")) } },
@@ -169,7 +176,9 @@ private fun AppKnowledgeItem(vm: MemoryViewModel, row: AppKnowledgeRow, first: B
     }
     Column {
         ListRow(null, row.name, stage, first = first, onClick = onToggle)
-        ChangesAndText(row.changedLines, row.markdown, expanded)
+        ChangesAndText(row.changedLines, expanded) {
+            Text(row.markdown, Modifier.padding(top = 6.dp), style = MikaType.Hint, color = MikaTheme.colors.ink2)
+        }
         RowActions {
             MikaButton(if (expanded) stringResource(R.string.skills_hide_full) else stringResource(R.string.skills_view_full), onToggle, kind = ButtonKind.Tonal, size = ButtonSize.Small)
             if (row.stage == AppKnowledgeStage.Draft) MikaButton(stringResource(R.string.skills_accept_try), { vm.approveAppDraft(row.id) }, size = ButtonSize.Small)
@@ -180,11 +189,20 @@ private fun AppKnowledgeItem(vm: MemoryViewModel, row: AppKnowledgeRow, first: B
 
 /** 技能行下面:更新草稿改了哪几行,展开时再加全文。 */
 @Composable
-private fun SkillBody(r: SkillRow, expanded: Boolean) = ChangesAndText(r.changedLines, r.markdown, expanded)
+private fun SkillBody(r: SkillRow, expanded: Boolean) = ChangesAndText(r.changedLines, expanded) {
+    val body = remember(r.markdown) { skillPreviewBody(r.markdown) }
+    SkillReadingView(body)
+}
+
+/** Strip only a recognized skill header; horizontal rules in ordinary Markdown are content. */
+internal fun skillPreviewBody(markdown: String): String {
+    val (metadata, body) = FrontMatter.parse(markdown)
+    return if (metadata["name"] is String && body.isNotBlank()) body else markdown
+}
 
 /** 一行下面:这份草稿改了哪几行([changed]),展开时再加全文。 */
 @Composable
-private fun ChangesAndText(changed: List<String>, markdown: String, expanded: Boolean) {
+private fun ChangesAndText(changed: List<String>, expanded: Boolean, content: @Composable () -> Unit) {
     val c = MikaTheme.colors
     if (changed.isEmpty() && !expanded) return
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
@@ -192,6 +210,6 @@ private fun ChangesAndText(changed: List<String>, markdown: String, expanded: Bo
             Text(stringResource(R.string.skills_changed_lines), style = MikaType.Hint, color = c.ink3)
             changed.forEach { Text(it, style = MikaType.Hint, color = if (it.startsWith("+")) c.ok else c.bad) }
         }
-        if (expanded) Text(markdown, Modifier.padding(top = 6.dp), style = MikaType.Hint, color = c.ink2)
+        if (expanded) content()
     }
 }

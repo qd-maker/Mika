@@ -3,7 +3,6 @@ package com.wangzan101.mika.core.skills
 import com.wangzan101.mika.core.assembly.knownToolNames
 import com.wangzan101.mika.core.knowledge.FrontMatter
 import com.wangzan101.mika.core.knowledge.GuideCatalog
-import com.wangzan101.mika.core.knowledge.PERSONAL_KIND
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,24 +11,24 @@ import org.junit.Test
 
 /** 别人分享来的 SKILL.md 进待收下(#165):出处、校验、内置名、同名更新、已有草稿。 */
 class SkillImportTest {
-    private val builtin = GuideCatalog.loadBundled().items.filter { it.kind != PERSONAL_KIND }.map { it.name }.toSet()
+    private val builtin = GuideCatalog.loadBundled().items.map { it.name }.toSet()
 
-    private fun md(name: String = "boss-search", extra: String = "", steps: String = "1. 打开 BOSS 直聘搜索岗位\n2. 按城市和薪资筛选") = """
+    private fun md(name: String = "meeting-notes", extra: String = "", steps: String = "1. 提取决定、负责人和截止时间\n2. 按主题整理待办") = """
         |---
         |name: $name
-        |display: 筛岗位
-        |description: 按城市、薪资和关键词筛岗位
+        |display: 会议纪要整理
+        |description: 把会议记录整理成决定和待办
         |$extra---
         |## 入口
-        |打开 BOSS 直聘。
+        |打开一份会议记录。
         |## 步骤
         |$steps
         |## 容易出错的地方
-        |筛选要点「确定」才生效。
+        |决定和待办要分开整理。
         |## 怎样算办成
-        |列表里只剩符合条件的岗位。
+        |纪要里有明确的决定、负责人和待办。
         |## 什么时候停下交给用户
-        |要发消息前交给用户。
+        |内容不清楚时交给用户确认。
         |""".trimMargin()
 
     private fun prepare(raw: String, store: PersonalSkills = InMemoryPersonalSkills()) =
@@ -46,12 +45,14 @@ class SkillImportTest {
     }
 
     @Test fun localFieldsFromTheSenderAreDropped() {
-        // 别人那边的出处、学自哪次运行、更新指向都不算数,出处由代码写
-        val raw = md(extra = "source: user\nlearned_from: run-42\nupdates: other-skill\n")
-        val meta = FrontMatter.parse((prepare(raw) as SkillImport.Result.Ready).skill.markdown).first
+        // 重复或带空白的本机字段也不能留下,出处只由代码写
+        val raw = md(extra = "source: user\nsource: learned\nlearned_from: run-42\nlearned_from : run-43\nupdates: other-skill\nupdates : another-skill\n")
+        val result = (prepare(raw) as SkillImport.Result.Ready).skill
+        val meta = FrontMatter.parse(result.markdown).first
         assertEquals(PersonalSkill.SOURCE_IMPORTED, meta["source"])
         assertNull(meta["learned_from"])
         assertNull(meta["updates"])
+        assertEquals(1, result.markdown.lines().count { it.substringBefore(':').trim() == "source" })
     }
 
     @Test fun fencedAndCrlfTextIsAccepted() {
@@ -61,8 +62,8 @@ class SkillImportTest {
 
     @Test fun sameChecksAsLearnedDrafts() {
         assertEquals(SkillImport.Result.Rejected("missing_section"), prepare(md().substringBefore("## 容易出错的地方")))
-        assertEquals(SkillImport.Result.Rejected("invalid_name"), prepare(md(name = "Boss Search")))
-        assertEquals(SkillImport.Result.Rejected("unknown_tool"), prepare(md(steps = "1. 调用 `steal_contacts` 读通讯录")))
+        assertEquals(SkillImport.Result.Rejected("invalid_name"), prepare(md(name = "Meeting Notes")))
+        assertEquals(SkillImport.Result.Rejected("unknown_tool"), prepare(md(steps = "1. 调用 `missing_tool` 整理记录")))
         assertEquals(SkillImport.Result.Rejected("too_long"), prepare(md(steps = "1. " + "很长".repeat(SkillDrafter.MAX_CHARS))))
     }
 
@@ -72,23 +73,30 @@ class SkillImportTest {
     }
 
     @Test fun sameNameAsMySkillBecomesAnUpdateDraft() {
-        val mine = personalSkill("boss-search")
+        val mine = personalSkill("meeting-notes")
         val r = prepare(md(), InMemoryPersonalSkills(mine)) as SkillImport.Result.Ready
-        assertEquals("boss-search", r.skill.replacesDraftOf)
+        assertEquals("meeting-notes", r.skill.replacesDraftOf)
         assertEquals(PersonalSkills.fingerprint(mine.markdown), r.skill.baseHash)
     }
 
     @Test fun refusedWhileADraftWithThatNameWaits() {
-        val store = InMemoryPersonalSkills().apply { putPending("d1", personalSkill("boss-search", status = SkillStatus.pending)) }
+        val store = InMemoryPersonalSkills().apply { putPending("d1", personalSkill("meeting-notes", status = SkillStatus.pending)) }
+        assertEquals(SkillImport.Result.Rejected("draft_pending"), prepare(md(), store))
+    }
+
+    @Test fun refusedWhileAnUpdateForThatSkillWaits() {
+        val store = InMemoryPersonalSkills().apply {
+            putPending("d1", personalSkill("other-notes", status = SkillStatus.pending).copy(replacesDraftOf = "meeting-notes"))
+        }
         assertEquals(SkillImport.Result.Rejected("draft_pending"), prepare(md(), store))
     }
 
     @Test fun shareableDropsLocalFieldsOnly() {
-        val shared = SkillImport.shareable(md(extra = "source: user\nlearned_from: run-42\n"))
+        val shared = SkillImport.shareable(md(extra = "source: user\nsource: learned\nlearned_from: run-42\nlearned_from : run-43\n"))
         val meta = FrontMatter.parse(shared).first
         assertNull(meta["source"])
         assertNull(meta["learned_from"])
-        assertEquals("boss-search", meta["name"])
+        assertEquals("meeting-notes", meta["name"])
         assertTrue(shared, "## 步骤" in shared)
         assertFalse(shared, "\r" in shared)
     }
